@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+*.egg-info/
+# model weights are downloaded automatically by ultralytics
+*.pt
+runs/
+*.mp4
+*.mov
