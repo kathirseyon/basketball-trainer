@@ -1,36 +1,52 @@
-"""Command line entry point: ``python -m hoopvision --source 0``."""
+"""Command line entry point.
+
+    python -m hoopvision --web --source 0          # dashboard with commentary + coach chat
+    python -m hoopvision --source game.mp4         # OpenCV window
+"""
 
 from __future__ import annotations
 
 import argparse
 import sys
 import time
+import webbrowser
 from pathlib import Path
 
 import cv2
 
 from .analyzer import AnalyzerConfig, GameAnalyzer
 from .app import Session
+from .chat import DEFAULT_MODEL, CoachChat
 from .hoop import HoopTracker
 from .identity import IdentityAssigner
 from .report import write_report
-from .structures import Box
+from .structures import OPPONENT, YOU, Box
 from .video import FrameSource
 
 WINDOW = "HoopVision"
-KEYS_HELP = "keys: q quit | space pause | s swap YOU/OPPONENT | click a player to mark YOU | h reselect hoop"
+KEYS_HELP = "keys: q quit | space pause | s swap players | click a player to mark YOU | h reselect hoop"
 
 
 def parse_args(argv=None) -> argparse.Namespace:
-    ap = argparse.ArgumentParser(prog="hoopvision", description="1v1 basketball tracker and scouting coach")
+    ap = argparse.ArgumentParser(prog="hoopvision", description="1v1 basketball tracker, commentator and coach")
     ap.add_argument("--source", default="0",
                     help="webcam index (0), video file, or phone stream URL, e.g. http://192.168.1.20:8080/video")
+    ap.add_argument("--web", action="store_true", help="run the web dashboard (commentary + coach chat)")
+    ap.add_argument("--port", type=int, default=8000)
+    ap.add_argument("--you-name", default=YOU, help="label for you")
+    ap.add_argument("--opp-name", default=OPPONENT, help="label for your opponent, e.g. WEMBY")
     ap.add_argument("--save", help="write the annotated video to this .mp4")
     ap.add_argument("--report-dir", help="where to write the scouting report (default runs/<timestamp>)")
     ap.add_argument("--no-display", action="store_true", help="run headless (no window)")
+    ap.add_argument("--no-court", action="store_true", help="hide the LIVE COURT minimap")
+    ap.add_argument("--no-ai", action="store_true", help="never call Claude (offline coach only)")
+    ap.add_argument("--no-ai-commentary", action="store_true", help="chat with Claude but skip AI commentary lines")
+    ap.add_argument("--model", default=DEFAULT_MODEL, help="Claude model for the coach")
+    ap.add_argument("--scout-possessions", type=int, default=5,
+                    help="opponent possessions to watch before the game plan is 'ready'")
     ap.add_argument("--width", type=int, default=1280, help="resize frames to this width (0 = keep)")
     ap.add_argument("--you-side", choices=["left", "right"], default="left",
-                    help="which side of the frame YOU start on (or click yourself in the window)")
+                    help="which side of the frame YOU start on (or click yourself)")
     ap.add_argument("--hoop", default=None,
                     help="'select' to drag a box around the hoop, or x,y,w,h in pixels of the resized frame")
     ap.add_argument("--camera-behind-hoop", action="store_true",
@@ -41,22 +57,22 @@ def parse_args(argv=None) -> argparse.Namespace:
     ap.add_argument("--device", help="cpu, mps, 0 (CUDA) ...")
     ap.add_argument("--imgsz", type=int, default=640)
     ap.add_argument("--skeleton", action="store_true", help="draw pose skeletons")
+    ap.add_argument("--no-realtime", action="store_true", help="web mode: process video files as fast as possible")
     ap.add_argument("--max-frames", type=int, default=0)
     return ap.parse_args(argv)
 
 
 def _select_hoop(frame) -> Box | None:
-    r = cv2.selectROI("Drag a box around the HOOP (rim + net), then press ENTER", frame, showCrosshair=False)
-    cv2.destroyWindow("Drag a box around the HOOP (rim + net), then press ENTER")
+    title = "Drag a box around the HOOP (rim + net), then press ENTER"
+    r = cv2.selectROI(title, frame, showCrosshair=False)
+    cv2.destroyWindow(title)
     x, y, w, h = map(int, r)
     return Box.from_xywh(x, y, w, h) if w > 2 and h > 2 else None
 
 
-def main(argv=None) -> int:
-    args = parse_args(argv)
+def build_session(args) -> Session:
     from .detection import YoloDetector  # heavy import after arg parsing
 
-    display = not args.no_display
     detector = YoloDetector(
         pose_weights=args.pose_weights,
         ball_weights=None if args.ball_weights.lower() == "none" else args.ball_weights,
@@ -64,22 +80,45 @@ def main(argv=None) -> int:
         device=args.device,
         imgsz=args.imgsz,
     )
-    session = Session(
+    return Session(
         detector,
         identity=IdentityAssigner(you_side=args.you_side),
         analyzer=GameAnalyzer(AnalyzerConfig(mirror=args.camera_behind_hoop)),
         hoop=HoopTracker(),
+        names={YOU: args.you_name.upper(), OPPONENT: args.opp_name.upper()},
         show_skeleton=args.skeleton,
+        show_court=not args.no_court,
+        scout_target=args.scout_possessions,
+        can_detect_hoop=bool(args.hoop_weights),
     )
 
-    source = FrameSource(args.source, width=args.width or None)
-    out_dir = Path(args.report_dir or f"runs/{time.strftime('%Y%m%d-%H%M%S')}")
+
+def run_web(args, session: Session, source: FrameSource, out_dir: Path) -> int:
+    from .server import Runner, create_app
+
+    chat = CoachChat(session.context, model=args.model, offline=args.no_ai)
+    session.enable_ai(chat, commentary=not args.no_ai_commentary)
+    hoop = None
+    if args.hoop and args.hoop != "select":
+        hoop = Box.from_xywh(*map(float, args.hoop.split(",")))
+    runner = Runner(session, source, out_dir, realtime=not args.no_realtime, save=args.save, hoop=hoop,
+                    max_frames=args.max_frames)
+    runner.start()
+    app = create_app(session, runner, chat)
+    url = f"http://localhost:{args.port}"
+    print(f"HoopVision dashboard: {url}  (coach: {'Claude' if chat.online else 'offline'})")
+    if not args.no_display:
+        webbrowser.open(url)
+    app.run(host="0.0.0.0", port=args.port, threaded=True)
+    return 0
+
+
+def run_window(args, session: Session, source: FrameSource, out_dir: Path) -> int:
+    display = not args.no_display
     writer = None
     paused = False
     hoop_mode = args.hoop or ("select" if display and not args.hoop_weights else None)
-    if hoop_mode is None and not args.hoop_weights:
-        print("No hoop location given: shot results and drive directions need one. Use --hoop x,y,w,h.",
-              file=sys.stderr)
+    printed = 0
 
     if display:
         cv2.namedWindow(WINDOW, cv2.WINDOW_NORMAL)
@@ -96,9 +135,12 @@ def main(argv=None) -> int:
                 elif hoop_mode != "select":
                     box = Box.from_xywh(*map(float, hoop_mode.split(",")))
                 if box is not None:
-                    session.hoop.set_manual(frame, box)
+                    session.set_hoop(frame, box)
 
             annotated = session.process(idx, t, frame)
+            for line in session.commentator.lines[printed:]:
+                print(f"[{line.clock}] {line.text}")
+            printed = len(session.commentator.lines)
 
             if args.save:
                 if writer is None:
@@ -107,10 +149,6 @@ def main(argv=None) -> int:
                     h, w = annotated.shape[:2]
                     writer = cv2.VideoWriter(args.save, cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
                 writer.write(annotated)
-
-            if not display and idx % 100 == 0:
-                total = f"/{source.frame_count}" if source.frame_count else ""
-                print(f"frame {idx}{total}", file=sys.stderr)
 
             if display:
                 cv2.imshow(WINDOW, annotated)
@@ -124,7 +162,7 @@ def main(argv=None) -> int:
                 elif key == ord("h"):
                     box = _select_hoop(frame)
                     if box is not None:
-                        session.hoop.set_manual(frame, box)
+                        session.set_hoop(frame, box)
             if args.max_frames and idx + 1 >= args.max_frames:
                 break
     except KeyboardInterrupt:
@@ -138,12 +176,24 @@ def main(argv=None) -> int:
 
     session.analyzer.finish()
     tips = session.tips()
-    path = write_report(out_dir, session.analyzer, tips, session.snapshot)
+    path = write_report(out_dir, session.analyzer, tips, session.snapshot, names=session.names,
+                        commentary=[l.text for l in session.commentator.lines])
     print("\n=== Coaching tips ===")
     for tip in tips:
         print(f"[{tip.side}] {tip.title}: {tip.text}\n    evidence: {tip.evidence}")
     print(f"\nFull report: {path / 'report.md'}")
+    print(f"Chat with the coach about it: python -m hoopvision.chat {path / 'report.json'}")
     return 0
+
+
+def main(argv=None) -> int:
+    args = parse_args(argv)
+    session = build_session(args)
+    source = FrameSource(args.source, width=args.width or None)
+    out_dir = Path(args.report_dir or f"runs/{time.strftime('%Y%m%d-%H%M%S')}")
+    if args.web:
+        return run_web(args, session, source, out_dir)
+    return run_window(args, session, source, out_dir)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HoopVision</title>
+<style>
+  :root {
+    --bg: #0d0f13; --panel: #161a21; --panel-2: #1d222b; --line: #2a303b;
+    --text: #e9edf3; --muted: #8b95a5; --hoop: #ff9600; --you: #3cdc5a; --opp: #eb3c3c; --ai: #a78bfa;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .app { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 16px; padding: 16px; height: 100%; }
+  @media (max-width: 960px) {
+    .app { grid-template-columns: 1fr; height: auto; }
+    .feed-card { flex: none; height: 320px; }
+    .chat-card { flex: none; height: 460px; }
+  }
+
+  .stage { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .brand { font-weight: 800; letter-spacing: .04em; margin-right: auto; }
+  .brand span { color: var(--hoop); }
+  button { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+    padding: 7px 12px; font: inherit; cursor: pointer; }
+  button:hover { border-color: var(--muted); }
+  button.active { border-color: var(--hoop); color: var(--hoop); }
+  button.danger { color: var(--opp); }
+  .video-wrap { position: relative; border-radius: 12px; overflow: hidden; background: #000;
+    border: 1px solid var(--line); align-self: center; max-width: 100%; }
+  .video-wrap img { display: block; max-width: 100%; max-height: calc(100vh - 110px); user-select: none; -webkit-user-drag: none; }
+  .video-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .video-wrap.picking { cursor: crosshair; }
+  .hint { color: var(--muted); font-size: 12px; min-height: 18px; }
+
+  .side { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+
+  .clock-card { padding: 14px 16px; }
+  .clock-row { display: flex; align-items: baseline; gap: 12px; }
+  .clock { font-size: 32px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .phase { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em;
+    padding: 3px 8px; border-radius: 999px; background: rgba(255,150,0,.15); color: var(--hoop); }
+  .phase.ready { background: rgba(60,220,90,.15); color: var(--you); }
+  .live-dot { margin-left: auto; font-size: 12px; color: var(--muted); }
+  .live-dot::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--opp); margin-right: 6px; animation: pulse 1.4s infinite; }
+  .live-dot.off::before { background: var(--muted); animation: none; }
+  @keyframes pulse { 50% { opacity: .3; } }
+  .bar { height: 6px; background: var(--panel-2); border-radius: 999px; margin: 10px 0 6px; overflow: hidden; }
+  .bar > div { height: 100%; width: 0; background: var(--hoop); transition: width .4s; }
+  .bar.ready > div { background: var(--you); }
+  .detail { color: var(--muted); font-size: 12px; }
+  .score { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+  .score div { background: var(--panel-2); border-radius: 8px; padding: 8px 10px; font-size: 12px; color: var(--muted); }
+  .score b { display: block; font-size: 13px; }
+
+  .feed-card { flex: 1 1 0; min-height: 180px; display: flex; flex-direction: column; }
+  .card h2 { margin: 0; padding: 12px 16px 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+  .feed { overflow-y: auto; padding: 0 16px 12px; display: flex; flex-direction: column; gap: 8px; }
+  .line { display: grid; grid-template-columns: 42px 1fr; gap: 8px; animation: fadein .3s; }
+  @keyframes fadein { from { opacity: 0; transform: translateY(4px); } }
+  .line time { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; padding-top: 1px; }
+  .line.system p { color: var(--muted); }
+  .line p { margin: 0; }
+  .tag { display: inline-block; font-size: 10px; font-weight: 800; letter-spacing: .06em; padding: 1px 6px;
+    border-radius: 4px; margin-right: 6px; vertical-align: 1px; }
+  .tag.insight { background: rgba(255,150,0,.18); color: var(--hoop); }
+  .tag.ai { background: rgba(167,139,250,.18); color: var(--ai); }
+  .line.play.you p { border-left: 3px solid var(--you); padding-left: 8px; }
+  .line.play.opp p { border-left: 3px solid var(--opp); padding-left: 8px; }
+
+  .chat-card { flex: 1 1 0; min-height: 260px; display: flex; flex-direction: column; }
+  .chat-head { display: flex; align-items: center; padding-right: 16px; }
+  .chat-head h2 { flex: 1; }
+  .mode { font-size: 11px; color: var(--muted); }
+  .msgs { flex: 1; overflow-y: auto; padding: 0 16px; display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: 92%; padding: 9px 12px; border-radius: 12px; white-space: pre-wrap; word-wrap: break-word; }
+  .msg.user { align-self: flex-end; background: var(--hoop); color: #1a1000; border-bottom-right-radius: 4px; }
+  .msg.coach { align-self: flex-start; background: var(--panel-2); border-bottom-left-radius: 4px; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 16px 0; }
+  .chips button { font-size: 12px; padding: 5px 10px; border-radius: 999px; }
+  form { display: flex; gap: 8px; padding: 10px 16px 14px; }
+  form input { flex: 1; min-width: 0; background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
+    border-radius: 8px; padding: 9px 12px; font: inherit; }
+  form input:focus { outline: none; border-color: var(--hoop); }
+</style>
+</head>
+<body>
+<div class="app">
+  <section class="stage">
+    <div class="toolbar">
+      <div class="brand">HOOP<span>VISION</span></div>
+      <button id="btn-hoop" title="Drag a box around the rim">Select hoop</button>
+      <button id="btn-me" title="Click the player who is you">That's me</button>
+      <button id="btn-swap">Swap players</button>
+      <button id="btn-stop" class="danger">End session</button>
+    </div>
+    <div class="video-wrap" id="wrap">
+      <img id="video" src="/stream.mjpg" alt="Live tracking view">
+      <canvas id="overlay"></canvas>
+    </div>
+    <div class="hint" id="hint"></div>
+  </section>
+
+  <aside class="side">
+    <div class="card clock-card">
+      <div class="clock-row">
+        <div class="clock" id="clock">0:00</div>
+        <div class="phase" id="phase">Calibrating</div>
+        <div class="live-dot" id="live">LIVE</div>
+      </div>
+      <div class="bar" id="bar"><div></div></div>
+      <div class="detail" id="detail">Starting up...</div>
+      <div class="score">
+        <div><b id="you-name" style="color:var(--you)">YOU</b><span id="you-score">FG 0/0 · drives 0</span></div>
+        <div><b id="opp-name" style="color:var(--opp)">OPPONENT</b><span id="opp-score">FG 0/0 · drives 0</span></div>
+      </div>
+    </div>
+
+    <div class="card feed-card">
+      <h2>AI commentary</h2>
+      <div class="feed" id="feed"></div>
+    </div>
+
+    <div class="card chat-card">
+      <div class="chat-head"><h2>Coach chat</h2><span class="mode" id="mode"></span></div>
+      <div class="msgs" id="msgs">
+        <div class="msg coach">I'm watching the game. Once I've seen a few possessions, ask me how to beat your opponent.</div>
+      </div>
+      <div class="chips" id="chips"></div>
+      <form id="form">
+        <input id="input" placeholder="Ask the coach..." autocomplete="off">
+        <button type="submit">Send</button>
+      </form>
+    </div>
+  </aside>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let since = 0, frame = null, names = { YOU: "YOU", OPPONENT: "OPPONENT" }, mode = null, drag = null;
+
+// ---------------------------------------------------------------- state poll
+async function poll() {
+  try {
+    const r = await fetch(`/api/state?since=${since}`);
+    const s = await r.json();
+    frame = s.frame; names = s.names;
+    const st = s.status;
+    $("clock").textContent = st.clock;
+    $("phase").textContent = st.label;
+    $("phase").classList.toggle("ready", st.phase === "ready");
+    $("bar").classList.toggle("ready", st.phase === "ready");
+    $("bar").firstElementChild.style.width = `${Math.round(st.progress * 100)}%`;
+    $("detail").textContent = st.detail;
+    $("live").classList.toggle("off", s.done);
+    $("live").textContent = s.done ? "ENDED" : "LIVE";
+    $("mode").textContent = s.coach === "claude" ? "powered by Claude" : "offline coach";
+    $("you-name").textContent = names.YOU; $("opp-name").textContent = names.OPPONENT;
+    for (const [role, el] of [["YOU", "you-score"], ["OPPONENT", "opp-score"]]) {
+      const p = s.score[role];
+      $(el).textContent = `FG ${p.shots.makes}/${p.shots.attempts} · drives ${p.drives.total}` +
+        (s.holder === role ? " · ball" : "");
+    }
+    renderChips();
+    for (const line of s.lines) addLine(line);
+    since += s.lines.length;
+  } catch (e) { /* server restarting */ }
+  setTimeout(poll, 700);
+}
+
+function addLine(l) {
+  const feed = $("feed");
+  const stick = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 40;
+  const div = document.createElement("div");
+  const who = l.player === "YOU" ? "you" : l.player === "OPPONENT" ? "opp" : "";
+  div.className = `line ${l.kind} ${who}`;
+  const t = document.createElement("time"); t.textContent = l.clock;
+  const p = document.createElement("p");
+  if (l.kind === "insight" || l.kind === "ai") {
+    const tag = document.createElement("span");
+    tag.className = `tag ${l.kind}`; tag.textContent = l.kind === "ai" ? "AI" : "PATTERN";
+    p.appendChild(tag);
+  }
+  p.appendChild(document.createTextNode(l.text));
+  div.append(t, p); feed.appendChild(div);
+  if (stick) feed.scrollTop = feed.scrollHeight;
+}
+
+// ---------------------------------------------------------------- chat
+let lastChipNames = "";
+function renderChips() {
+  const key = names.OPPONENT;
+  if (key === lastChipNames) return;
+  lastChipNames = key;
+  const qs = [`How do I guard ${names.OPPONENT}?`, `What's ${names.OPPONENT}'s go-to move?`,
+              "How should I attack them?", "What should I practice?"];
+  $("chips").replaceChildren(...qs.map((q) => {
+    const b = document.createElement("button"); b.type = "button"; b.textContent = q;
+    b.onclick = () => send(q); return b;
+  }));
+}
+
+function bubble(cls, text) {
+  const d = document.createElement("div"); d.className = `msg ${cls}`; d.textContent = text;
+  $("msgs").appendChild(d); $("msgs").scrollTop = $("msgs").scrollHeight; return d;
+}
+
+async function send(text) {
+  text = text.trim(); if (!text) return;
+  bubble("user", text); $("input").value = "";
+  const out = bubble("coach", "…");
+  try {
+    const r = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: text }) });
+    const reader = r.body.getReader(); const dec = new TextDecoder(); let acc = "";
+    for (;;) {
+      const { done, value } = await reader.read(); if (done) break;
+      acc += dec.decode(value, { stream: true }); out.textContent = acc;
+      $("msgs").scrollTop = $("msgs").scrollHeight;
+    }
+    if (!acc) out.textContent = "(no answer)";
+  } catch (e) { out.textContent = "Couldn't reach the coach."; }
+}
+$("form").onsubmit = (e) => { e.preventDefault(); send($("input").value); };
+
+// ---------------------------------------------------------------- video tools
+const img = $("video"), canvas = $("overlay"), ctx = canvas.getContext("2d");
+function setMode(m) {
+  mode = mode === m ? null : m;
+  $("btn-hoop").classList.toggle("active", mode === "hoop");
+  $("btn-me").classList.toggle("active", mode === "me");
+  $("wrap").classList.toggle("picking", !!mode);
+  $("hint").textContent = mode === "hoop" ? "Drag a box around the rim and net on the camera view."
+    : mode === "me" ? "Click on yourself in the camera view." : "";
+  clearCanvas();
+}
+function toFrame(ev) {
+  const r = img.getBoundingClientRect();
+  const sx = img.naturalWidth / r.width, sy = img.naturalHeight / r.height;
+  return { x: (ev.clientX - r.left) * sx, y: (ev.clientY - r.top) * sy, cx: ev.clientX - r.left, cy: ev.clientY - r.top };
+}
+function clearCanvas() {
+  canvas.width = canvas.clientWidth; canvas.height = canvas.clientHeight;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+const post = (url, body) => fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body || {}) });
+
+canvas.addEventListener("pointerdown", (ev) => {
+  if (!mode || !frame) return;
+  const p = toFrame(ev);
+  if (p.y > frame.h) return;  // clicked the court panel, not the video
+  if (mode === "me") { post("/api/you", { x: p.x, y: p.y }); setMode(null); return; }
+  drag = { start: p }; canvas.setPointerCapture(ev.pointerId);
+});
+canvas.addEventListener("pointermove", (ev) => {
+  if (!drag) return;
+  const p = toFrame(ev); clearCanvas();
+  ctx.strokeStyle = "#ff9600"; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
+  ctx.strokeRect(drag.start.cx, drag.start.cy, p.cx - drag.start.cx, p.cy - drag.start.cy);
+  drag.end = p;
+});
+canvas.addEventListener("pointerup", () => {
+  if (!drag) return;
+  const a = drag.start, b = drag.end || a; drag = null;
+  const box = { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(a.x - b.x), h: Math.abs(a.y - b.y) };
+  if (box.w > 3 && box.h > 3) post("/api/hoop", box);
+  setMode(null);
+});
+$("btn-hoop").onclick = () => setMode("hoop");
+$("btn-me").onclick = () => setMode("me");
+$("btn-swap").onclick = () => post("/api/swap");
+$("btn-stop").onclick = () => { if (confirm("End the session and write the report?")) post("/api/stop"); };
+window.addEventListener("resize", clearCanvas);
+
+poll();
+</script>
+</body>
+</html>

@@ -55,6 +55,23 @@ def hist_distance(a: np.ndarray | None, b: np.ndarray | None) -> float:
     return float(np.clip(cv2.compareHist(a, b, cv2.HISTCMP_BHATTACHARYYA), 0.0, 1.0))
 
 
+HUE_NAMES = [(10, "red"), (22, "orange"), (35, "yellow"), (85, "green"), (130, "blue"), (165, "purple"), (180, "red")]
+
+
+def color_name(hist: np.ndarray | None) -> str | None:
+    """Rough shirt colour name from a torso hue/saturation histogram."""
+    if hist is None:
+        return None
+    h = np.asarray(hist, np.float32)
+    sat_bins = h.shape[1]
+    colourful = h[:, sat_bins // 3:]  # ignore washed-out pixels
+    if colourful.sum() < 0.35 * max(h.sum(), 1e-6):
+        return "white/grey"
+    hue_bin = int(np.argmax(colourful.sum(axis=1)))
+    hue = (hue_bin + 0.5) * 180 / h.shape[0]
+    return next(name for limit, name in HUE_NAMES if hue <= limit)
+
+
 @dataclass
 class RoleTrack:
     role: str
@@ -114,6 +131,10 @@ class IdentityAssigner:
             a, b = self.tracks[YOU], self.tracks[OPPONENT]
             a.role, b.role = OPPONENT, YOU
             self.tracks = {YOU: b, OPPONENT: a}
+
+    def shirt(self, role: str) -> str | None:
+        tr = self.tracks.get(role)
+        return color_name(tr.hist) if tr else None
 
     def reset(self) -> None:
         self.tracks.clear()

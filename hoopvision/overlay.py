@@ -80,7 +80,8 @@ def draw_ball(img: np.ndarray, ball: Box | None, trail: deque) -> None:
         cv2.circle(img, (int(ball.cx), int(ball.cy)), r, COLORS["BALL"], 2, cv2.LINE_AA)
 
 
-def draw_scoreboard(img: np.ndarray, summary: dict, holder: str | None, fps: float | None) -> None:
+def draw_scoreboard(img: np.ndarray, summary: dict, holder: str | None, fps: float | None,
+                    names: dict[str, str] | None = None) -> None:
     s = _scale(img)
     fs, th = 0.55 * s, max(1, int(s))
     rows = []
@@ -95,7 +96,7 @@ def draw_scoreboard(img: np.ndarray, summary: dict, holder: str | None, fps: flo
     for i, (role, txt) in enumerate(rows):
         y = y0 + int(8 * s) + lh * (i + 1) - int(8 * s)
         cv2.circle(img, (x0 + int(12 * s), y - int(6 * s)), int(6 * s), COLORS[role], -1)
-        name = role + (" *" if holder == role else "")
+        name = (names or {}).get(role, role) + (" *" if holder == role else "")
         cv2.putText(img, name, (x0 + int(24 * s), y), FONT, fs, COLORS[role], th, cv2.LINE_AA)
         cv2.putText(img, txt, (x0 + int(150 * s), y), FONT, fs * 0.9, (235, 235, 235), th, cv2.LINE_AA)
     if fps:
@@ -145,3 +146,20 @@ def draw_status(img: np.ndarray, text: str) -> None:
     y = img.shape[0] // 2
     _blend_rect(img, x - 16, y - tht - 16, x + tw + 16, y + 16, (20, 20, 20), 0.7)
     cv2.putText(img, text, (x, y), FONT, fs, (255, 255, 255), th, cv2.LINE_AA)
+
+
+def draw_phase(img: np.ndarray, status: dict) -> None:
+    """Session clock + phase progress bar under the scoreboard."""
+    s = _scale(img)
+    x0, y0 = int(12 * s), int(84 * s)
+    w, h = int(430 * s), int(34 * s)
+    _blend_rect(img, x0, y0, x0 + w, y0 + h, (20, 20, 20), 0.6)
+    fs, th = 0.5 * s, max(1, int(s))
+    text = f"{status['clock']}  {status['label'].upper()}"
+    cv2.putText(img, text, (x0 + int(10 * s), y0 + int(22 * s)), FONT, fs, (255, 255, 255), th, cv2.LINE_AA)
+    bx1, bx2 = x0 + int(230 * s), x0 + w - int(12 * s)
+    by1, by2 = y0 + int(13 * s), y0 + int(21 * s)
+    cv2.rectangle(img, (bx1, by1), (bx2, by2), (70, 70, 70), -1)
+    fill = bx1 + int((bx2 - bx1) * status["progress"])
+    color = COLORS["HOOP"] if status["phase"] != "ready" else COLORS[YOU]
+    cv2.rectangle(img, (bx1, by1), (fill, by2), color, -1)

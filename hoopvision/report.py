@@ -62,7 +62,9 @@ def _table(rows: dict[str, list[int]]) -> list[str]:
     return out + [""]
 
 
-def write_report(out_dir: str | Path, analyzer: GameAnalyzer, tips: list[Tip], snapshot: np.ndarray | None) -> Path:
+def write_report(out_dir: str | Path, analyzer: GameAnalyzer, tips: list[Tip], snapshot: np.ndarray | None,
+                 names: dict[str, str] | None = None, commentary: list[str] | None = None) -> Path:
+    names = {YOU: YOU, OPPONENT: OPPONENT, **(names or {})}
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     summary = analyzer.summary()
@@ -71,7 +73,7 @@ def write_report(out_dir: str | Path, analyzer: GameAnalyzer, tips: list[Tip], s
                for p, n in frequent_sequences(analyzer.sequences(role))]
         for role in ROLES
     }
-    data = {"summary": summary, "patterns": patterns, "tips": [t.to_dict() for t in tips],
+    data = {"names": names, "summary": summary, "commentary": commentary or [], "patterns": patterns, "tips": [t.to_dict() for t in tips],
             "events": [{"t": round(e.t, 2), "player": e.player, "kind": e.kind, **e.detail}
                        for e in analyzer.events if e.kind != "dribble"]}
     (out / "report.json").write_text(json.dumps(data, indent=2, default=str))
@@ -89,7 +91,7 @@ def write_report(out_dir: str | Path, analyzer: GameAnalyzer, tips: list[Tip], s
     md.append("")
     for role in (OPPONENT, YOU):
         p = summary["players"][role]
-        md += [f"## {role}", ""]
+        md += [f"## {names[role]}" + (f" ({role})" if names[role] != role else ""), ""]
         md.append(f"- Possessions: {p['possessions']}, turnovers: {p['turnovers']}")
         md.append(f"- Drives: {p['drives']['total']} {p['drives']['by_direction']} "
                   f"(got past defender: {p['drives']['got_past_by_direction']})")
@@ -105,5 +107,7 @@ def write_report(out_dir: str | Path, analyzer: GameAnalyzer, tips: list[Tip], s
             md.append("")
     for img in images:
         md += [f"![{img}]({img})", ""]
+    if commentary:
+        md += ["## Commentary log", ""] + [f"- {line}" for line in commentary] + [""]
     (out / "report.md").write_text("\n".join(md))
     return out

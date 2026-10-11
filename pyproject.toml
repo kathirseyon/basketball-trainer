@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "1v1 basketball tracking and opponent scouting from a phone or laptop camera"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["ultralytics>=8.3", "opencv-python>=4.9", "numpy>=1.26", "scipy>=1.11", "lap>=0.5"]
+dependencies = ["ultralytics>=8.3", "opencv-python>=4.9", "numpy>=1.26", "scipy>=1.11", "lap>=0.5", "flask>=3.0", "anthropic>=1.0"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
@@ -18,6 +18,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["hoopvision"]
+
+[tool.setuptools.package-data]
+hoopvision = ["web/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

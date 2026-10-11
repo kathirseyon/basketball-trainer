@@ -94,8 +94,8 @@ def generate_tips(summary: dict) -> list[Tip]:
         if k / n_x >= 0.6:
             tips.append(Tip(
                 k + 1, "defense", "Don't bite on the crossover",
-                f"After a crossover they usually {describe_token(nxt)}. Stay low through the cross "
-                f"and be ready for that next move instead of reaching.",
+                f"Their move right after a crossover is usually the same: {describe_token(nxt)}. Stay low "
+                f"through the cross and be ready for that next move instead of reaching.",
                 f"crossover -> {describe_token(nxt)}: {_pct(k, n_x)}",
             ))
 

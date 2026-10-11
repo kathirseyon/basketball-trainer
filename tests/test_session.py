@@ -35,7 +35,7 @@ def test_full_pipeline_writes_report(tmp_path):
     session.identity.select_you_at(you0.box.cx, you0.box.cy)
     for i, (you, opp, ball) in enumerate(script):
         out = session.process(i, i / FPS, render(you, opp, ball, i))
-        assert out.shape == first.shape
+        assert out.shape[1] == first.shape[1] and out.shape[0] > first.shape[0]  # video + live court
     session.analyzer.finish()
 
     s = session.analyzer.summary()["players"][OPPONENT]

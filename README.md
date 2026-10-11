@@ -1,8 +1,9 @@
 # HoopVision 🏀
 
-**A 1v1 basketball tracker and scouting coach that runs on a phone or laptop camera.**
+**A 1v1 basketball tracker, live commentator and AI coach that runs on a phone or laptop camera.**
 
-HoopVision watches a 1v1 game, puts game-style hitboxes on **YOU**, your **OPPONENT** and the **HOOP**, and
+HoopVision watches a 1v1 game, puts game-style hitboxes on **YOU**, your **OPPONENT** and the **HOOP**,
+draws both players on a top-down **LIVE COURT**, narrates the game with a running clock, and
 works out how each player plays: which way they drive, which hand they dribble with, what they do after a
 crossover, where they shoot from and how often it goes in. It then mines the opponent's possessions for
 plays they keep repeating and turns all of that into specific advice, e.g.
@@ -17,6 +18,13 @@ plays they keep repeating and turns all of that into specific advice, e.g.
 
 ## Features
 
+- **Web dashboard**: the tracked video with the LIVE COURT minimap underneath, an **AI commentary** feed,
+  and a **coach chat** where you can ask Claude how to beat your opponent, grounded in the game data.
+- **Commentary with a session clock** that walks through three phases:
+  *Calibrating* (finding the hoop, locking onto both players and their shirt colours, spotting the ball),
+  *Scouting* (a recap of every possession while it watches the opponent's first N possessions), and
+  *Game plan ready* (tendencies and repeated plays are called out as `PATTERN` lines as they appear).
+  With an API key, Claude adds short `AI` analyst lines every ~30 seconds.
 - **Live tracking overlay**: corner-bracket hitboxes with name tags, ball trail, pose skeletons (optional),
   a live scoreboard (FG, drives, crossovers), an event feed and a coaching banner that updates as you play.
 - **Robust YOU/OPPONENT identity**: each player gets a shirt-colour signature plus a motion model, matched
@@ -36,7 +44,11 @@ plays they keep repeating and turns all of that into specific advice, e.g.
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# Laptop webcam
+# Web dashboard: video + live court + AI commentary + coach chat
+python -m hoopvision --web --source 0 --opp-name WEMBY
+# then open http://localhost:8000 (it opens automatically)
+
+# Plain OpenCV window (commentary prints to the terminal)
 python -m hoopvision --source 0
 
 # A video you recorded on your phone
@@ -45,9 +57,29 @@ python -m hoopvision --source game.mp4 --save annotated.mp4
 
 YOLO weights (`yolo11n-pose.pt`, `yolo11n.pt`) download automatically on first run.
 
-On the first frame you'll be asked to **drag a box around the hoop** (rim + net), then press Enter.
-YOU is whoever starts on the left (`--you-side right` to flip), or just **click on yourself** in the
-window at any time.
+### Coach chat setup (optional)
+
+The chat and AI commentary use Claude (`claude-opus-5-5` by default, `--model` to change it). Set an
+API key from [console.anthropic.com](https://console.anthropic.com):
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+Without a key everything still works: the chat answers from the rule-based coach, and the commentary
+stays deterministic. `--no-ai` forces offline mode, and `--no-ai-commentary` keeps the chat but skips the
+AI analyst lines. Only the computed game stats and the commentary text are sent to the API, never video
+frames. After a session you can keep chatting about it:
+`python -m hoopvision.chat runs/<timestamp>/report.json`.
+
+### Calibrating
+
+In the dashboard, click **Select hoop** and drag a box around the rim (in the OpenCV window you're asked
+on the first frame). YOU is whoever starts on the left (`--you-side right` to flip). If it picked the wrong
+player, click **That's me** and then yourself, or hit **Swap players**. The commentary tells you what it's
+still looking for.
+
+OpenCV window keys:
 
 | Key | Action |
 | --- | --- |
@@ -78,6 +110,9 @@ The report lands in `runs/<timestamp>/report.md`.
 ### Useful options
 
 ```
+--you-name / --opp-name labels on the hitboxes and court, e.g. --opp-name WEMBY
+--scout-possessions 5   opponent possessions to watch before the game plan is "ready"
+--no-court              hide the LIVE COURT minimap
 --hoop x,y,w,h          give the hoop location instead of selecting it (headless runs)
 --hoop-weights best.pt  detect the hoop automatically with a custom model (see below)
 --no-display            run without a window (e.g. on a server)
@@ -100,8 +135,14 @@ flowchart LR
     F --> G[Pattern miner<br/>repeated move sequences]
     F --> H[Coach<br/>evidence-based tips]
     G --> H
-    F --> I[Overlay + report]
+    F --> I[Overlay + live court + report]
     H --> I
+    F --> J[Commentator<br/>clock, phases, recaps]
+    H --> J
+    J --> K[Web dashboard]
+    I --> K
+    H --> L[Coach chat<br/>Claude + game data]
+    L --> K
 ```
 
 | Module | What it does |
@@ -113,7 +154,10 @@ flowchart LR
 | `analyzer.py` | The state machine that turns frames into events: possession with hysteresis, dribble bounces (ball's lowest point below the hips) and which wrist is closest, crossovers, drives (direction from the cross product of movement against the line to the rim), blow-bys, shots (ball rising above the head), makes (ball seen above the rim, then below it inside the rim's width). |
 | `patterns.py` | Counts contiguous move n-grams per possession and keeps the maximal ones. |
 | `coach.py` | Rules that turn tendencies into advice, each gated by a minimum sample size. |
-| `overlay.py`, `report.py` | HUD drawing; Markdown/JSON report, heatmap and shot chart. |
+| `overlay.py`, `court_view.py`, `report.py` | HUD drawing, the top-down LIVE COURT, and the Markdown/JSON report with heatmap and shot chart. |
+| `commentary.py` | Calibrating → Scouting → Game plan ready state machine with a session clock; possession recaps and new-pattern callouts. |
+| `chat.py` | Claude coach: each question is sent with a fresh JSON snapshot of the stats, repeated plays, tips and recent commentary (append-only history, cached system prompt, streamed answers). Falls back to an offline coach. Also the optional AI analyst. |
+| `server.py`, `web/index.html` | Flask dashboard: MJPEG video stream, polling for clock and commentary, streamed chat, and click/drag tools for the hoop and "that's me". |
 
 The analytics layer only consumes plain dataclasses (`structures.py`), so it is unit-tested with a
 synthetic scene generator (`tests/sim.py`): no camera, GPU or model needed.
