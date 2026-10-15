@@ -11,6 +11,7 @@ import numpy as np
 
 from . import overlay
 from .analyzer import GameAnalyzer
+from .ball import BallState, BallTracker
 from .chat import AIAnalyst, CoachChat
 from .coach import Tip, generate_tips
 from .commentary import Commentator
@@ -19,6 +20,7 @@ from .detection import Detector
 from .hoop import HoopTracker
 from .identity import IdentityAssigner
 from .patterns import describe, frequent_sequences
+from .scoring import Scoreboard
 from .structures import OPPONENT, ROLES, YOU, Box
 
 
@@ -35,11 +37,16 @@ class Session:
         show_court: bool = True,
         scout_target: int = 5,
         can_detect_hoop: bool = False,
+        scoreboard: Scoreboard | None = None,
+        ball_tracker: BallTracker | None = None,
     ):
         self.detector = detector
         self.identity = identity or IdentityAssigner()
         self.analyzer = analyzer or GameAnalyzer()
         self.hoop = hoop or HoopTracker()
+        self.scoreboard = scoreboard or Scoreboard()
+        self.ball = ball_tracker or BallTracker()
+        self.ball_state: BallState | None = None
         self.names = {YOU: YOU, OPPONENT: OPPONENT, **(names or {})}
         self.tip_interval = tip_interval
         self.show_skeleton = show_skeleton
@@ -49,7 +56,6 @@ class Session:
         self.court = CourtView(overlay.COLORS, self.names)
         self.feed: deque[tuple[str, str]] = deque(maxlen=4)
         self.trail: deque[tuple[float, float]] = deque(maxlen=14)
-        self._ball_missing = 0
         self.ball_seen = False
         self.tip: Tip | None = None
         self.latest_tips: list[Tip] = []
@@ -86,6 +92,8 @@ class Session:
                         for p, n in frequent_sequences(self.analyzer.sequences(r))]
                     for r in ROLES
                 },
+                "score": self.scoreboard.to_dict(),
+                "ball_visible_share": round(self.ball.visibility, 2),
                 "tips": [t.to_dict() for t in generate_tips(summary)],
                 "commentary": [l.text for l in self.commentator.lines[-15:]],
             }
@@ -100,6 +108,12 @@ class Session:
                 "names": dict(self.names),
                 "holder": holder,
                 "score": {r: board[r] for r in ROLES},
+                "game": self.scoreboard.to_dict(),
+                "ball": {
+                    "tracking": self.ball.active,
+                    "visible": bool(self.ball_state and self.ball_state.visible),
+                    "visible_share": round(self.ball.visibility, 2),
+                },
                 "tip": self.tip.to_dict() if self.tip else None,
                 "frame": {"w": self.frame_size[0], "h": self.frame_size[1]} if self.frame_size else None,
                 "fps": round(self._fps or 0, 1),
@@ -109,6 +123,51 @@ class Session:
         with self.lock:
             self.hoop.set_manual(frame, box)
 
+    # ------------------------------------------------------------------ score
+    def score_text(self) -> str:
+        p = self.scoreboard.points
+        return f"{self.names[YOU]} {p[YOU]} - {self.names[OPPONENT]} {p[OPPONENT]}"
+
+    def _announce(self, announcements: list[dict]) -> None:
+        sb = self.scoreboard
+        for a in announcements:
+            if a["type"] == "game_point":
+                self.commentator.say("score", f"Game point {self.names[a['player']]}! ({self.score_text()})",
+                                     a["player"])
+            elif a["type"] == "game_over":
+                w = a["winner"]
+                lose = OPPONENT if w == YOU else YOU
+                series = f"{self.names[YOU]} {sb.games_won[YOU]} - {self.names[OPPONENT]} {sb.games_won[OPPONENT]}"
+                self.commentator.say("score", f"GAME OVER - {self.names[w]} wins game {a['game']}, "
+                                              f"{a['final'][w]}-{a['final'][lose]}. Games: {series}. "
+                                              f"Game {sb.game} starts at 0-0.", w)
+
+    def adjust_score(self, role: str, delta: int) -> None:
+        """Manual correction from the dashboard / keyboard (e.g. a make the camera missed)."""
+        with self.lock:
+            before = dict(self.scoreboard.points)
+            ann = self.scoreboard.add(self.commentator.t, role, delta, "manual")
+            if ann or self.scoreboard.points != before:
+                sign = "+" if delta > 0 else ""
+                self.commentator.say("score", f"Score corrected: {sign}{delta} {self.names[role]} "
+                                              f"({self.score_text()})", role)
+            self._announce(ann)
+
+    def undo_score(self) -> None:
+        with self.lock:
+            role = self.scoreboard.undo(self.commentator.t)
+            if role is not None:
+                self.commentator.say("score", f"Last score undone ({self.score_text()})", role)
+
+    def _track_ball(self, frame: np.ndarray, t: float, det) -> BallState | None:
+        cands = det.ball_candidates()
+        near = getattr(self.detector, "detect_ball_near", None)
+        region = self.ball.search_region(t)
+        if near is not None and region is not None and not any(region.contains(*b.center) for b, _ in cands):
+            # Full-frame detector missed it: look again, zoomed in, where it should be.
+            cands = cands + near(frame, region)
+        return self.ball.update(t, cands)
+
     # ---------------------------------------------------------------- per frame
     def process(self, idx: int, t: float, frame: np.ndarray) -> np.ndarray:
         det = self.detector(frame)
@@ -116,19 +175,30 @@ class Session:
             self.frame_size = (frame.shape[1], frame.shape[0])
             hoop = self.hoop.update(frame, det.hoop)
             players = self.identity.update(frame, det.persons, t)
-            events = self.analyzer.update(idx, t, players, det.ball, hoop, frame.shape[1])
-            self.ball_seen |= det.ball is not None
+            ball = self.ball_state = self._track_ball(frame, t, det)
+            # Only real measurements reach the analyzer; predictions can't fake a dribble or a make.
+            events = self.analyzer.update(idx, t, players, ball.measured if ball else None, hoop, frame.shape[1])
+            self.ball_seen |= self.ball.active
+
+            announcements = []
+            for e in events:
+                if e.kind == "shot_result" and e.detail["result"] == "make":
+                    pts, ann = self.scoreboard.make(t, e.player, e.detail["three"])
+                    e.detail["points"] = pts
+                    over = next((a for a in ann if a["type"] == "game_over"), None)
+                    e.detail["score_text"] = (f"+{pts}, that's the game!" if over
+                                              else f"+{pts} ({self.score_text()})")
+                    announcements += ann
 
             for e in events:
                 if e.kind != "dribble":
                     self.feed.append((e.player, e.text().replace(e.player, self.names[e.player], 1)))
-            if det.ball is not None:
-                self.trail.append(det.ball.center)
-                self._ball_missing = 0
-            else:
-                self._ball_missing += 1
-                if self._ball_missing > 8:
+            if ball is not None and ball.visible:
+                if ball.jumped:
                     self.trail.clear()
+                self.trail.append(ball.box.center)
+            elif ball is None:
+                self.trail.clear()
 
             new_tips = None
             if t - self._last_tip_t >= self.tip_interval:
@@ -142,6 +212,7 @@ class Session:
                 t, hoop_ready=hoop is not None, players=players, shirts=shirts, ball_seen=self.ball_seen,
                 events=events, analyzer=self.analyzer, tips=new_tips, can_detect_hoop=self.can_detect_hoop,
             )
+            self._announce(announcements)
             if self.analyst is not None and self.commentator.phase != "calibrating":
                 done = sum(len(self.analyzer.stats[r].possessions) for r in ROLES)
                 self.analyst.maybe_run(t, done)
@@ -158,7 +229,7 @@ class Session:
                 self._fps = inst if self._fps is None else 0.9 * self._fps + 0.1 * inst
             self._last_wall = now
 
-            return self.render(frame, players, det.ball, hoop)
+            return self.render(frame, players, ball, hoop)
 
     def render(self, frame, players, ball, hoop) -> np.ndarray:
         img = frame.copy()
@@ -173,8 +244,10 @@ class Session:
             if self.show_skeleton:
                 overlay.draw_skeleton(img, p, color)
             overlay.draw_hitbox(img, p.box, self.names[role], color, "BALL" if holder == role else None)
-        overlay.draw_ball(img, ball, self.trail)
-        overlay.draw_scoreboard(img, self.analyzer.scoreboard(), holder, self._fps, self.names)
+        overlay.draw_ball(img, ball.box if ball else None, self.trail, predicted=bool(ball and not ball.visible))
+        board = self.analyzer.scoreboard()
+        board["points"] = self.scoreboard.points
+        overlay.draw_scoreboard(img, board, holder, self._fps, self.names)
         overlay.draw_feed(img, list(self.feed))
         overlay.draw_phase(img, self.commentator.status(self.analyzer))
         if self.tip is not None and self.commentator.phase != "calibrating":
@@ -183,7 +256,9 @@ class Session:
             overlay.draw_status(img, "Waiting for both players to be in frame...")
         if self.show_court:
             h, w = img.shape[:2]
-            img = np.vstack([img, self.court.render(w, int(w * 0.56))])
+            court = self.court.render(w, int(w * 0.56), ball_with=holder,
+                                      ball_at_rim=self.analyzer.pending_shot is not None)
+            img = np.vstack([img, court])
         return img
 
 

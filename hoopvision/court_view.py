@@ -21,6 +21,7 @@ BG = (36, 30, 27)
 LINE = (210, 210, 210)
 PAINT = (82, 55, 34)
 RIM = (0, 150, 255)
+BALL = (0, 220, 255)
 
 
 class CourtView:
@@ -36,7 +37,7 @@ class CourtView:
         y = float(np.clip(RIM_Y + pos.depth * PLAYER_HEIGHT_M, 0, COURT_D))
         self.trails[role].append((x, y))
 
-    def render(self, width: int, height: int) -> np.ndarray:
+    def render(self, width: int, height: int, ball_with: str | None = None, ball_at_rim: bool = False) -> np.ndarray:
         img = np.empty((height, width, 3), np.uint8)
         img[:] = (24, 20, 18)
         s = width / 1280
@@ -98,4 +99,13 @@ class CourtView:
             (tw, th), _ = cv2.getTextSize(label, font, 0.5 * s, max(1, int(s)))
             cv2.putText(img, label, (p[0] - tw // 2, p[1] - int(16 * s)), font, 0.5 * s, (255, 255, 255),
                         max(1, int(s)), cv2.LINE_AA)
+            if role == ball_with:
+                _ball(img, (p[0] + int(13 * s), p[1] + int(8 * s)), int(6 * s))
+        if ball_at_rim:
+            _ball(img, P(0, RIM_Y + 0.5), int(6 * s))
         return img
+
+
+def _ball(img: np.ndarray, center: tuple[int, int], r: int) -> None:
+    cv2.circle(img, center, r + 2, (20, 20, 20), -1, cv2.LINE_AA)
+    cv2.circle(img, center, r, BALL, -1, cv2.LINE_AA)

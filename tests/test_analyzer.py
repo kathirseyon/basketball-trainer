@@ -55,8 +55,8 @@ def test_steal_is_a_turnover():
 
 def test_stepback_jumper():
     frames = hold_frames((2.0, 2.0), (1.6, 1.5), holder_is_you=True, n=20)
-    frames += move_frames((2.0, 2.0), (2.5, 2.6), (1.6, 1.5), holder_is_you=True, n=10)
-    frames += shot_frames((2.5, 2.6), (1.6, 1.5), shooter_is_you=True, make=True)
+    frames += move_frames((2.0, 2.0), (2.8, 2.9), (1.6, 1.5), holder_is_you=True, n=10)
+    frames += shot_frames((2.8, 2.9), (1.6, 1.5), shooter_is_you=True, make=True)
     an = play(frames)
     shot = next(e for e in an.events if e.kind == "shot")
     assert shot.player == YOU

@@ -20,11 +20,13 @@ from .chat import DEFAULT_MODEL, CoachChat
 from .hoop import HoopTracker
 from .identity import IdentityAssigner
 from .report import write_report
+from .scoring import SCORING_SYSTEMS, Scoreboard
 from .structures import OPPONENT, YOU, Box
 from .video import FrameSource
 
 WINDOW = "HoopVision"
-KEYS_HELP = "keys: q quit | space pause | s swap players | click a player to mark YOU | h reselect hoop"
+KEYS_HELP = ("keys: q quit | space pause | s swap players | click a player to mark YOU | h reselect hoop\n"
+             "      1 / 2 add a point to YOU / OPPONENT | u undo last score change")
 
 
 def parse_args(argv=None) -> argparse.Namespace:
@@ -35,6 +37,10 @@ def parse_args(argv=None) -> argparse.Namespace:
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--you-name", default=YOU, help="label for you")
     ap.add_argument("--opp-name", default=OPPONENT, help="label for your opponent, e.g. WEMBY")
+    ap.add_argument("--scoring", choices=sorted(SCORING_SYSTEMS), default="1s2s",
+                    help="1s2s: 1 inside the arc, 2 behind it (streetball); 2s3s: regular 2s and 3s")
+    ap.add_argument("--game-to", type=int, default=11, help="points needed to win a game")
+    ap.add_argument("--win-by", type=int, default=1, help="winning margin required (2 = win by two)")
     ap.add_argument("--save", help="write the annotated video to this .mp4")
     ap.add_argument("--report-dir", help="where to write the scouting report (default runs/<timestamp>)")
     ap.add_argument("--no-display", action="store_true", help="run headless (no window)")
@@ -90,6 +96,7 @@ def build_session(args) -> Session:
         show_court=not args.no_court,
         scout_target=args.scout_possessions,
         can_detect_hoop=bool(args.hoop_weights),
+        scoreboard=Scoreboard(scoring=args.scoring, game_to=args.game_to, win_by=args.win_by),
     )
 
 
@@ -159,6 +166,12 @@ def run_window(args, session: Session, source: FrameSource, out_dir: Path) -> in
                     paused = not paused
                 elif key == ord("s"):
                     session.identity.swap()
+                elif key == ord("1"):
+                    session.adjust_score(YOU, 1)
+                elif key == ord("2"):
+                    session.adjust_score(OPPONENT, 1)
+                elif key == ord("u"):
+                    session.undo_score()
                 elif key == ord("h"):
                     box = _select_hoop(frame)
                     if box is not None:
@@ -177,7 +190,11 @@ def run_window(args, session: Session, source: FrameSource, out_dir: Path) -> in
     session.analyzer.finish()
     tips = session.tips()
     path = write_report(out_dir, session.analyzer, tips, session.snapshot, names=session.names,
-                        commentary=[l.text for l in session.commentator.lines])
+                        commentary=[l.text for l in session.commentator.lines],
+                        score=session.scoreboard.to_dict())
+    print(f"\nScore: {session.score_text()}  (games won: "
+          f"{session.names[YOU]} {session.scoreboard.games_won[YOU]} - "
+          f"{session.names[OPPONENT]} {session.scoreboard.games_won[OPPONENT]})")
     print("\n=== Coaching tips ===")
     for tip in tips:
         print(f"[{tip.side}] {tip.title}: {tip.text}\n    evidence: {tip.evidence}")

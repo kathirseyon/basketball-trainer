@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
+import cv2
 import numpy as np
 
 from .structures import Box, Detections, Person
@@ -27,6 +28,20 @@ class Detector(Protocol):
 
 def _class_ids(names: dict[int, str], keywords: tuple[str, ...]) -> list[int]:
     return [i for i, n in names.items() if any(k in n.lower() for k in keywords)]
+
+
+def _all_boxes(result, class_ids: list[int] | None, dx: float = 0.0, dy: float = 0.0,
+               scale: float = 1.0) -> list[tuple[Box, float]]:
+    boxes = result.boxes
+    if boxes is None or len(boxes) == 0:
+        return []
+    out = []
+    for b, c, k in zip(boxes.xyxy.cpu().numpy(), boxes.conf.cpu().numpy(), boxes.cls.cpu().numpy().astype(int)):
+        if class_ids is not None and k not in class_ids:
+            continue
+        x1, y1, x2, y2 = (float(v) / scale for v in b)
+        out.append((Box(x1 + dx, y1 + dy, x2 + dx, y2 + dy), float(c)))
+    return out
 
 
 def _best_box(result, class_ids: list[int] | None) -> tuple[Box | None, float]:
@@ -116,14 +131,32 @@ class YoloDetector:
             r = self.ball_model.predict(
                 frame, classes=[COCO_SPORTS_BALL], conf=self.ball_conf, imgsz=self.ball_imgsz, **kw
             )[0]
-            det.ball, det.ball_conf = _best_box(r, None)
+            det.balls += _all_boxes(r, None)
 
         if self.hoop_model is not None:
             r = self.hoop_model.predict(frame, conf=self.hoop_conf, imgsz=self.imgsz, **kw)[0]
             det.hoop, _ = _best_box(r, self.hoop_classes or None)
             if self.custom_ball_classes:
-                ball, conf = _best_box(r, self.custom_ball_classes)
-                if ball is not None and conf > det.ball_conf:
-                    det.ball, det.ball_conf = ball, conf
+                det.balls += _all_boxes(r, self.custom_ball_classes)
 
+        if det.balls:
+            det.ball, det.ball_conf = max(det.balls, key=lambda bc: bc[1])
         return det
+
+    def detect_ball_near(self, frame: np.ndarray, region: Box) -> list[tuple[Box, float]]:
+        """Re-run ball detection on a zoomed crop: a small, blurry ball is far easier to
+        find at 3-4x magnification than in the full frame."""
+        model = self.hoop_model if self.custom_ball_classes else self.ball_model
+        if model is None:
+            return []
+        h, w = frame.shape[:2]
+        x1, y1, x2, y2 = region.clip(w, h).as_int()
+        if x2 - x1 < 16 or y2 - y1 < 16:
+            return []
+        crop = frame[y1:y2, x1:x2]
+        side = 320
+        scale = side / max(crop.shape[:2])
+        crop = cv2.resize(crop, None, fx=scale, fy=scale, interpolation=cv2.INTER_LINEAR)
+        classes = self.custom_ball_classes if self.custom_ball_classes else [COCO_SPORTS_BALL]
+        r = model.predict(crop, classes=classes, conf=self.ball_conf, imgsz=side, **self._common())[0]
+        return _all_boxes(r, None, x1, y1, scale)

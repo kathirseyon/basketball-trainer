@@ -18,6 +18,8 @@ def test_zones():
     assert zone_of(CourtPos(0.2, 0.5)) == "paint"
     assert zone_of(CourtPos(0.0, 2.5)) == "top mid-range"
     assert zone_of(CourtPos(-3.0, 1.0)) == "left mid-range"
+    assert zone_of(CourtPos(0.0, 3.6)) == "top mid-range"   # just inside the arc (6.5 m)
+    assert zone_of(CourtPos(0.0, 3.9)) == "top perimeter"   # behind it (7.0 m)
     assert zone_of(CourtPos(3.5, 2.0)) == "right perimeter"
     assert side_of(CourtPos(2.0, 0.5)) == "right"
 

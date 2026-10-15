@@ -29,6 +29,8 @@ label it as general.
 - Turn tendencies into something they can do on the next possession: stance, which side to shade, when to \
 close out, which move to use, what to look for first. Short drills are welcome when they ask how to improve.
 - Left/right in the data are from the attacker's view facing the hoop.
+- "score" is the live game score (points per player, games won, scoring rules); use it for situational \
+advice such as what to do at game point or when trailing.
 - The tracking is approximate (single phone camera). Treat odd numbers with healthy skepticism.
 - This is a chat on a phone-sized panel: answer in a few short paragraphs or a tight list, no headings."""
 

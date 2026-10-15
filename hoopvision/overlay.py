@@ -71,13 +71,30 @@ def draw_skeleton(img: np.ndarray, person: Person, color) -> None:
             cv2.line(img, tuple(map(int, pa)), tuple(map(int, pb)), color, 2, cv2.LINE_AA)
 
 
-def draw_ball(img: np.ndarray, ball: Box | None, trail: deque) -> None:
+def draw_ball(img: np.ndarray, ball: Box | None, trail: deque, predicted: bool = False) -> None:
+    """Ball trail plus a small hitbox; while the tracker is only predicting
+    (ball hidden or blurred) the box is dimmed and labelled "BALL?"."""
     pts = [tuple(map(int, p)) for p in trail]
     for i in range(1, len(pts)):
         cv2.line(img, pts[i - 1], pts[i], COLORS["BALL"], max(1, int(4 * i / len(pts))), cv2.LINE_AA)
-    if ball is not None:
-        r = int(max(ball.w, ball.h) / 2) + 3
-        cv2.circle(img, (int(ball.cx), int(ball.cy)), r, COLORS["BALL"], 2, cv2.LINE_AA)
+    if ball is None:
+        return
+    s = _scale(img)
+    r = max(ball.w, ball.h) / 2 + 6 * s
+    box = Box(ball.cx - r, ball.cy - r, ball.cx + r, ball.cy + r)
+    color = COLORS["BALL"] if not predicted else (0, 140, 170)
+    x1, y1, x2, y2 = box.as_int()
+    L = max(4, int((x2 - x1) * 0.3))
+    t = max(2, int(2 * s))
+    for (cx, cy, dx, dy) in ((x1, y1, 1, 1), (x2, y1, -1, 1), (x1, y2, 1, -1), (x2, y2, -1, -1)):
+        cv2.line(img, (cx, cy), (cx + dx * L, cy), color, t, cv2.LINE_AA)
+        cv2.line(img, (cx, cy), (cx, cy + dy * L), color, t, cv2.LINE_AA)
+    fs, th = 0.42 * s, max(1, int(s))
+    label = "BALL?" if predicted else "BALL"
+    (tw, tht), base = cv2.getTextSize(label, FONT, fs, th)
+    pad = int(3 * s)
+    cv2.rectangle(img, (x1, y1 - tht - base - 2 * pad), (x1 + tw + 2 * pad, y1), color, -1)
+    cv2.putText(img, label, (x1 + pad, y1 - pad - base), FONT, fs, (20, 20, 20), th, cv2.LINE_AA)
 
 
 def draw_scoreboard(img: np.ndarray, summary: dict, holder: str | None, fps: float | None,
@@ -85,6 +102,7 @@ def draw_scoreboard(img: np.ndarray, summary: dict, holder: str | None, fps: flo
     s = _scale(img)
     fs, th = 0.55 * s, max(1, int(s))
     rows = []
+    points = summary.get("points", {})
     for role in (YOU, OPPONENT):
         p = summary["players"][role]
         sh = p["shots"]
@@ -98,7 +116,10 @@ def draw_scoreboard(img: np.ndarray, summary: dict, holder: str | None, fps: flo
         cv2.circle(img, (x0 + int(12 * s), y - int(6 * s)), int(6 * s), COLORS[role], -1)
         name = (names or {}).get(role, role) + (" *" if holder == role else "")
         cv2.putText(img, name, (x0 + int(24 * s), y), FONT, fs, COLORS[role], th, cv2.LINE_AA)
-        cv2.putText(img, txt, (x0 + int(150 * s), y), FONT, fs * 0.9, (235, 235, 235), th, cv2.LINE_AA)
+        if role in points:
+            cv2.putText(img, str(points[role]), (x0 + int(118 * s), y), FONT, fs * 1.25, (255, 255, 255),
+                        max(1, int(round(1.5 * s))), cv2.LINE_AA)
+        cv2.putText(img, txt, (x0 + int(165 * s), y), FONT, fs * 0.85, (235, 235, 235), th, cv2.LINE_AA)
     if fps:
         cv2.putText(img, f"{fps:.0f} FPS", (img.shape[1] - int(90 * s), int(28 * s)), FONT, 0.5 * s,
                     (200, 200, 200), th, cv2.LINE_AA)

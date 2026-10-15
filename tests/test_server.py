@@ -56,8 +56,16 @@ def test_dashboard_api(tmp_path):
     assert client.post("/api/hoop", json={"x": 1, "y": 1, "w": 1, "h": 1}).status_code == 400
     assert client.post("/api/swap").get_json() == {"ok": True}
 
+    before = session.scoreboard.points["YOU"]
+    r = client.post("/api/score", json={"role": "YOU", "delta": 1}).get_json()
+    assert r["points"]["YOU"] == before + 1
+    assert client.post("/api/score/undo").get_json()["points"]["YOU"] == before
+    assert client.post("/api/score", json={"role": "REF", "delta": 1}).status_code == 400
+    assert client.get("/api/state").get_json()["ball"]["tracking"] in (True, False)
+
     report = json.loads((tmp_path / "report.json").read_text())
     assert report["names"]["OPPONENT"] == "WEMBY"
+    assert report["score"]["points"]["OPPONENT"] == 2  # two made layups, 1 point each
     assert any(line.startswith("Calibrating") for line in report["commentary"])
 
 

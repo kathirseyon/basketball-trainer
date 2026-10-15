@@ -25,6 +25,15 @@ plays they keep repeating and turns all of that into specific advice, e.g.
   *Scouting* (a recap of every possession while it watches the opponent's first N possessions), and
   *Game plan ready* (tendencies and repeated plays are called out as `PATTERN` lines as they appear).
   With an API key, Claude adds short `AI` analyst lines every ~30 seconds.
+- **Score tracking**: detected makes score automatically (1s and 2s by default, `--scoring 2s3s` for
+  2s and 3s, using the three-point arc), with games played to `--game-to` (and `--win-by 2` if you want it).
+  You get "game point" and "game over" calls, games won across a series, and the score on screen, in the
+  commentary and in the report. The camera will miss the odd make, so the dashboard has **+1 / −1 / Undo**
+  buttons (keys `1`, `2`, `u` in the OpenCV window).
+- **Ball tracking**: a Kalman filter follows the ball through blur and hands. It ignores stray "balls" in
+  the background, keeps predicting during short dropouts (shown as a dimmed `BALL?` box), jumps to the ball
+  when it reappears somewhere new (e.g. picked up under the net), and when the full-frame detector misses
+  it, re-runs detection on a zoomed crop around where the ball should be. The live court shows who has it.
 - **Live tracking overlay**: corner-bracket hitboxes with name tags, ball trail, pose skeletons (optional),
   a live scoreboard (FG, drives, crossovers), an event feed and a coaching banner that updates as you play.
 - **Robust YOU/OPPONENT identity**: each player gets a shirt-colour signature plus a motion model, matched
@@ -85,6 +94,8 @@ OpenCV window keys:
 | --- | --- |
 | click | mark that player as YOU |
 | `s` | swap YOU / OPPONENT |
+| `1` / `2` | add a point to YOU / OPPONENT (a make the camera missed) |
+| `u` | undo the last score change |
 | `h` | re-select the hoop |
 | space | pause |
 | `q` | quit and write the report |
@@ -111,6 +122,8 @@ The report lands in `runs/<timestamp>/report.md`.
 
 ```
 --you-name / --opp-name labels on the hitboxes and court, e.g. --opp-name WEMBY
+--scoring 1s2s|2s3s     points per make inside / behind the arc (default 1s2s)
+--game-to 11 --win-by 2 game length and winning margin
 --scout-possessions 5   opponent possessions to watch before the game plan is "ready"
 --no-court              hide the LIVE COURT minimap
 --hoop x,y,w,h          give the hoop location instead of selecting it (headless runs)
@@ -150,6 +163,8 @@ flowchart LR
 | `detection.py` | Runs YOLO pose (players, keypoints, ByteTrack IDs), the COCO "sports ball" class, and an optional custom hoop model. |
 | `hoop.py` | Keeps a stable hoop box: smoothing plus template matching to follow small camera shake. |
 | `identity.py` | Torso HSV histograms (Bhattacharyya distance) + constant-velocity prediction + track-ID bonus → Hungarian assignment. It only updates a shirt signature when the players don't overlap, so their colours don't bleed into each other. |
+| `ball.py` | Constant-velocity Kalman filter over ball detections: gating against false positives, coasting through dropouts, re-anchoring on a consistent new detection, and a search region for zoomed re-detection. Only real measurements reach the analyzer, so predictions can't fake a dribble or a make. |
+| `scoring.py` | Points per make (inside / behind the arc), game-to / win-by, game point and game over, series, manual corrections and undo. |
 | `court.py` | Converts pixels into hoop-relative court coordinates measured in *body heights*, using each player's own height as a ruler, and buckets positions into zones (paint, left/top/right mid-range and perimeter). |
 | `analyzer.py` | The state machine that turns frames into events: possession with hysteresis, dribble bounces (ball's lowest point below the hips) and which wrist is closest, crossovers, drives (direction from the cross product of movement against the line to the rim), blow-bys, shots (ball rising above the head), makes (ball seen above the rim, then below it inside the rim's width). |
 | `patterns.py` | Counts contiguous move n-grams per possession and keeps the maximal ones. |
@@ -184,8 +199,12 @@ That helps a lot, because COCO's "sports ball" struggles with a small, blurry ba
 
 - **Single uncalibrated camera.** Distances are estimated in body heights, so zones are approximate.
   Next step: click 4 court landmarks once to get a homography and real court coordinates.
-- **Ball detection is the weakest link** with stock COCO weights (motion blur, occlusion by hands). A
-  basketball-specific model, or a Kalman filter on the ball, would improve dribble and shot detection.
+- **Ball detection is still the weakest link** with stock COCO weights (motion blur, occlusion by hands).
+  The tracker and zoomed re-search help, but a basketball-specific model (see below) helps most, and it
+  feeds straight into scoring.
+- **Automatic scoring relies on seeing the ball go through the rim**, so keep the hoop well in frame and use
+  the +1 / undo buttons when it misses one. Whether a shot is behind the arc comes from the approximate
+  court distance, so close calls can be wrong.
 - **Thresholds are hand-tuned** (see `AnalyzerConfig`). Labelling a few games would allow evaluating
   event precision/recall and tuning them properly.
 - Ideas: LLM-written scouting summaries from `report.json`, a mobile app using an on-device model

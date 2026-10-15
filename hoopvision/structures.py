@@ -130,6 +130,12 @@ class Person:
 @dataclass
 class Detections:
     persons: list[Person] = field(default_factory=list)
-    ball: Box | None = None
+    ball: Box | None = None          # most confident ball detection
     ball_conf: float = 0.0
+    balls: list[tuple[Box, float]] = field(default_factory=list)  # every ball candidate
     hoop: Box | None = None
+
+    def ball_candidates(self) -> list[tuple[Box, float]]:
+        if self.balls:
+            return self.balls
+        return [(self.ball, self.ball_conf or 1.0)] if self.ball is not None else []

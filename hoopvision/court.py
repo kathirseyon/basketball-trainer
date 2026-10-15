@@ -26,7 +26,8 @@ HOOP_HEIGHT_M = 3.05
 DEPTH_FORESHORTENING = 1.6
 
 PAINT_RADIUS = 1.4   # ≈ 2.5 m
-MID_RADIUS = 3.4     # ≈ 6.1 m, just inside the three-point line
+MID_RADIUS = 6.75 / PLAYER_HEIGHT_M   # the three-point arc: "perimeter" means behind it
+THREE_POINT_RADIUS = MID_RADIUS
 SIDE_RATIO = 0.45    # |lateral| / distance above this counts as a side, not the top
 
 

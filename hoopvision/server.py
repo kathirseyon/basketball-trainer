@@ -17,7 +17,7 @@ from .app import Session, encode_jpeg
 from .chat import CoachChat
 from .commentary import clock
 from .report import write_report
-from .structures import Box
+from .structures import ROLES, Box
 from .video import FrameSource
 
 WEB_DIR = Path(__file__).parent / "web"
@@ -94,7 +94,8 @@ class Runner(threading.Thread):
             s.analyzer.finish()
             tips = s.tips()
             self.report_path = write_report(self.out_dir, s.analyzer, tips, s.snapshot,
-                                            names=s.names, commentary=[l.text for l in s.commentator.lines])
+                                            names=s.names, commentary=[l.text for l in s.commentator.lines],
+                                            score=s.scoreboard.to_dict())
             s.commentator.say("system", f"Session over at {clock(s.commentator.elapsed)}. Report saved to "
                                         f"{self.report_path / 'report.md'}. You can keep chatting with me.")
         with self._cond:
@@ -159,6 +160,20 @@ def create_app(session: Session, runner: Runner, chat: CoachChat) -> Flask:
         with session.lock:
             session.identity.swap()
         return jsonify(ok=True)
+
+    @app.post("/api/score")
+    def score():
+        b = request.get_json(force=True)
+        role, delta = b.get("role"), int(b.get("delta", 0))
+        if role not in ROLES or delta not in (-1, 1, 2, 3):
+            return jsonify(error="role must be YOU/OPPONENT, delta -1..3"), 400
+        session.adjust_score(role, delta)
+        return jsonify(session.scoreboard.to_dict())
+
+    @app.post("/api/score/undo")
+    def score_undo():
+        session.undo_score()
+        return jsonify(session.scoreboard.to_dict())
 
     @app.post("/api/stop")
     def stop():

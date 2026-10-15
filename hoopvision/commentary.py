@@ -174,8 +174,9 @@ class Commentator:
                 moves.append(f"gets by {self.names[_other(e.player)]}")
             result = {"make": "and it's GOOD.", "miss": "no good.", "unknown": "couldn't see if it dropped."}
             build = (", ".join(moves) + ", then ") if moves else ""
+            score = f" {e.detail['score_text']}" if e.detail.get("score_text") else ""
             self.say("play", f"{name} {build}{e.detail['type']} from the {e.detail['zone']} - "
-                             f"{result.get(e.detail['result'], '')}", e.player)
+                             f"{result.get(e.detail['result'], '')}{score}", e.player)
         elif e.kind == "turnover":
             self.say("play", f"{name} loses it - {self.names[_other(e.player)]} comes away with the ball.", e.player)
 

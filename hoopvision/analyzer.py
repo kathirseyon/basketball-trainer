@@ -24,7 +24,7 @@ import math
 from collections import Counter, deque
 from dataclasses import dataclass, field
 
-from .court import CourtPos, PLAYER_HEIGHT_M, court_position, side_of, zone_of
+from .court import THREE_POINT_RADIUS, CourtPos, PLAYER_HEIGHT_M, court_position, side_of, zone_of
 from .structures import OPPONENT, ROLES, YOU, Box, Person
 
 
@@ -437,7 +437,8 @@ class GameAnalyzer:
         s = self.pending_shot
         s.result = result
         self.pending_shot = None
-        self._emit(s.player, "shot_result", result=result, type=s.type, zone=s.zone)
+        self._emit(s.player, "shot_result", result=result, type=s.type, zone=s.zone,
+                   three=s.pos.distance >= THREE_POINT_RADIUS)
 
     def _update_shot(self, ball: Box | None, players: dict[str, Person | None]) -> None:
         s = self.pending_shot

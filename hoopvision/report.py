@@ -63,7 +63,8 @@ def _table(rows: dict[str, list[int]]) -> list[str]:
 
 
 def write_report(out_dir: str | Path, analyzer: GameAnalyzer, tips: list[Tip], snapshot: np.ndarray | None,
-                 names: dict[str, str] | None = None, commentary: list[str] | None = None) -> Path:
+                 names: dict[str, str] | None = None, commentary: list[str] | None = None,
+                 score: dict | None = None) -> Path:
     names = {YOU: YOU, OPPONENT: OPPONENT, **(names or {})}
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -73,7 +74,7 @@ def write_report(out_dir: str | Path, analyzer: GameAnalyzer, tips: list[Tip], s
                for p, n in frequent_sequences(analyzer.sequences(role))]
         for role in ROLES
     }
-    data = {"names": names, "summary": summary, "commentary": commentary or [], "patterns": patterns, "tips": [t.to_dict() for t in tips],
+    data = {"names": names, "score": score, "summary": summary, "commentary": commentary or [], "patterns": patterns, "tips": [t.to_dict() for t in tips],
             "events": [{"t": round(e.t, 2), "player": e.player, "kind": e.kind, **e.detail}
                        for e in analyzer.events if e.kind != "dribble"]}
     (out / "report.json").write_text(json.dumps(data, indent=2, default=str))
@@ -85,6 +86,18 @@ def write_report(out_dir: str | Path, analyzer: GameAnalyzer, tips: list[Tip], s
         images = ["heatmap.png", "shot_chart.png"]
 
     md = ["# HoopVision scouting report", "", f"Session length: {summary['duration_s']} s", ""]
+    if score:
+        md += ["## Score", ""]
+        for i, final in enumerate(score["final_scores"], start=1):
+            w = max(final, key=final.get)
+            md.append(f"- Game {i}: {names[w]} won {final[w]}-{min(final.values())}")
+        pts = score["points"]
+        if any(pts.values()) or not score["final_scores"]:
+            md.append(f"- Game {score['game']} (unfinished): {names[YOU]} {pts[YOU]} - "
+                      f"{names[OPPONENT]} {pts[OPPONENT]}")
+        md += [f"- Games won: {names[YOU]} {score['games_won'][YOU]} - "
+               f"{names[OPPONENT]} {score['games_won'][OPPONENT]} "
+               f"(to {score['game_to']}, {score['scoring']}, win by {score['win_by']})", ""]
     md += ["## Coaching tips", ""]
     for t in tips:
         md.append(f"- **[{t.side}] {t.title}** - {t.text} _(evidence: {t.evidence})_")
