@@ -25,6 +25,11 @@ CardData.SHINY_CHANCE = 0.01
 CardData.SHINY_MULTIPLIER = 5
 CardData.CARDS_PER_PACK = 5
 
+-- 3D shop: customers pay this multiple of a card's sell price.
+CardData.SHOP_PRICE_MULTIPLIER = 2
+CardData.BASE_CASES = 2
+CardData.MAX_CUSTOMERS = 4
+
 -- Original creatures only: no real Pokemon names or art.
 CardData.Cards = {
 	-- Common
@@ -116,6 +121,14 @@ CardData.Upgrades = {
 		id = "cashier", name = "Hire Cashier", maxLevel = 25, baseCost = 150, costGrowth = 1.5,
 		describe = function(level) return ("Earn %d coins/sec, even while idle"):format(level * 2) end,
 	},
+	{
+		id = "cases", name = "Display Cases", maxLevel = 6, baseCost = 250, costGrowth = 2.2,
+		describe = function(level) return ("%d display cases in your shop"):format(CardData.BASE_CASES + level) end,
+	},
+	{
+		id = "ads", name = "Advertising", maxLevel = 10, baseCost = 300, costGrowth = 1.7,
+		describe = function(level) return ("A customer every %.1f sec"):format(CardData.GetCustomerInterval(level)) end,
+	},
 }
 
 CardData.UpgradeById = {}
@@ -150,6 +163,18 @@ end
 
 function CardData.GetSellPrice(key, sellLevel)
 	return math.floor(CardData.GetBaseValue(key) * (1 + 0.1 * sellLevel))
+end
+
+function CardData.GetShopPrice(key, sellLevel)
+	return CardData.GetSellPrice(key, sellLevel) * CardData.SHOP_PRICE_MULTIPLIER
+end
+
+function CardData.GetCaseCount(casesLevel)
+	return CardData.BASE_CASES + casesLevel
+end
+
+function CardData.GetCustomerInterval(adsLevel)
+	return 10 / (1 + 0.2 * adsLevel)
 end
 
 return CardData

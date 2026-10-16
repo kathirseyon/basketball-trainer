@@ -180,12 +180,19 @@ local function makePanel(name, title)
 	return content
 end
 
-local function togglePanel(name)
-	local opening = not panels[name].Visible
+local function openPanel(name)
 	closePanels()
-	panels[name].Visible = opening
-	if opening and panelRefreshers[name] then
+	panels[name].Visible = true
+	if panelRefreshers[name] then
 		panelRefreshers[name]()
+	end
+end
+
+local function togglePanel(name)
+	if panels[name].Visible then
+		panels[name].Visible = false
+	else
+		openPanel(name)
 	end
 end
 
@@ -421,7 +428,7 @@ create("UIPadding", {
 	PaddingRight = UDim.new(0, 14), PaddingBottom = UDim.new(0, 6), Parent = binderScroll,
 })
 create("UIGridLayout", {
-	CellSize = UDim2.fromOffset(110, 196), CellPadding = UDim2.fromOffset(12, 12),
+	CellSize = UDim2.fromOffset(110, 232), CellPadding = UDim2.fromOffset(12, 12),
 	SortOrder = Enum.SortOrder.LayoutOrder, Parent = binderScroll,
 })
 
@@ -439,7 +446,7 @@ local function makeSellButton(key, count, cell)
 	local text = "Sell 🪙" .. formatNumber(price)
 	local sellButton = button({
 		Text = text, BackgroundColor3 = RED, AnchorPoint = Vector2.new(0, 1),
-		Position = UDim2.fromScale(0, 1), Size = UDim2.new(1, 0, 0, 30), Parent = cell,
+		Position = UDim2.new(0, 0, 1, -34), Size = UDim2.new(1, 0, 0, 30), Parent = cell,
 	})
 	-- Ask twice before selling your last copy of something Rare or better.
 	local needsConfirm = count == 1 and rarityOrder(key) >= 3
@@ -455,6 +462,21 @@ local function makeSellButton(key, count, cell)
 			return
 		end
 		sellCard(key)
+	end)
+end
+
+local function makeDisplayButton(key, cell)
+	local displayButton = button({
+		Text = "🏪 Display", BackgroundColor3 = Color3.fromRGB(70, 110, 200), AnchorPoint = Vector2.new(0, 1),
+		Position = UDim2.fromScale(0, 1), Size = UDim2.new(1, 0, 0, 30), Parent = cell,
+	})
+	displayButton.Activated:Connect(function()
+		local result = remotes.StockCase:InvokeServer(key)
+		if result and result.ok then
+			toast("Put on display for 🪙" .. formatNumber(CardData.GetShopPrice(key, sellLevel())), GREEN)
+		else
+			toast(result and result.err or "Couldn't display", RED)
+		end
 	end)
 end
 
@@ -477,25 +499,33 @@ local function refreshBinder()
 			if count > 1 then
 				dupeValue += CardData.GetSellPrice(key, sellLevel()) * (count - 1)
 			end
-			-- Always show a slot for the normal card; shinies only once owned.
-			if count > 0 or not isShiny then
+			-- Always show a slot for the normal card; shinies only once found.
+			local discovered = state.discovered[key]
+			if discovered or not isShiny then
 				order += 1
 				local cell = create("Frame", { BackgroundTransparency = 1, LayoutOrder = order, Parent = binderScroll })
-				if count > 0 then
+				if discovered then
 					local cardFrame = makeCard(key, cell)
-					cardFrame.Size = UDim2.new(1, 0, 1, -36)
-					if count > 1 then
-						local badge = label({
-							Text = "x" .. count, BackgroundTransparency = 0, BackgroundColor3 = DARK,
-							AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, 4, 0, -4),
-							Size = UDim2.fromOffset(38, 22), ZIndex = 5, Parent = cardFrame,
+					cardFrame.Size = UDim2.new(1, 0, 1, -72)
+					local badge = label({
+						Text = "x" .. count, BackgroundTransparency = 0, BackgroundColor3 = count > 0 and DARK or RED,
+						AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, 4, 0, -4),
+						Size = UDim2.fromOffset(38, 22), ZIndex = 5, Parent = cardFrame,
+					})
+					round(badge, 6)
+					if count > 0 then
+						makeSellButton(key, count, cell)
+						makeDisplayButton(key, cell)
+					else
+						-- Found before, but sold or on display: show it faded.
+						create("Frame", {
+							BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.5,
+							Size = UDim2.fromScale(1, 1), ZIndex = 4, Parent = cardFrame,
 						})
-						round(badge, 6)
 					end
-					makeSellButton(key, count, cell)
 				else
 					local locked = create("Frame", {
-						BackgroundColor3 = Color3.fromRGB(55, 58, 80), Size = UDim2.new(1, 0, 1, -36), Parent = cell,
+						BackgroundColor3 = Color3.fromRGB(55, 58, 80), Size = UDim2.new(1, 0, 1, -72), Parent = cell,
 					})
 					round(locked, 10)
 					label({ Text = "?", TextColor3 = GREY, Position = UDim2.fromScale(0.2, 0.15), Size = UDim2.fromScale(0.6, 0.45), Parent = locked })
@@ -530,12 +560,12 @@ end)
 -- Upgrades panel -----------------------------------------------------------
 
 local upgradesContent = makePanel("Upgrades", "⬆️ Shop Upgrades")
-create("UIListLayout", { Padding = UDim.new(0.04, 0), SortOrder = Enum.SortOrder.LayoutOrder, Parent = upgradesContent })
+create("UIListLayout", { Padding = UDim.new(0.025, 0), SortOrder = Enum.SortOrder.LayoutOrder, Parent = upgradesContent })
 
 local upgradeRows = {}
 for index, upgrade in ipairs(CardData.Upgrades) do
 	local row = create("Frame", {
-		BackgroundColor3 = Color3.fromRGB(45, 48, 70), Size = UDim2.fromScale(1, 0.28), LayoutOrder = index, Parent = upgradesContent,
+		BackgroundColor3 = Color3.fromRGB(45, 48, 70), Size = UDim2.fromScale(1, 0.18), LayoutOrder = index, Parent = upgradesContent,
 	})
 	round(row, 12)
 	local nameLabel = label({
@@ -588,19 +618,25 @@ panelRefreshers.Upgrades = refreshUpgrades
 
 local menu = create("Frame", {
 	AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 12, 0.5, 0),
-	Size = UDim2.fromOffset(140, 190), BackgroundTransparency = 1, Parent = gui,
+	Size = UDim2.fromOffset(140, 254), BackgroundTransparency = 1, Parent = gui,
 })
 create("UIListLayout", { Padding = UDim.new(0, 10), SortOrder = Enum.SortOrder.LayoutOrder, Parent = menu })
 for index, entry in ipairs({
 	{ name = "Packs", text = "📦 Packs", color = Color3.fromRGB(80, 160, 255) },
 	{ name = "Binder", text = "📖 Binder", color = Color3.fromRGB(190, 90, 255) },
 	{ name = "Upgrades", text = "⬆️ Upgrades", color = Color3.fromRGB(255, 160, 40) },
+	{ name = "Shop", text = "🏪 My Shop", color = Color3.fromRGB(60, 190, 90) },
 }) do
 	local menuButton = button({
 		Text = entry.text, BackgroundColor3 = entry.color, Size = UDim2.new(1, 0, 0, 56), LayoutOrder = index, Parent = menu,
 	})
 	menuButton.Activated:Connect(function()
-		togglePanel(entry.name)
+		if entry.name == "Shop" then
+			closePanels()
+			remotes.GoToShop:FireServer()
+		else
+			togglePanel(entry.name)
+		end
 	end)
 end
 
@@ -609,9 +645,9 @@ end
 local function countUnique()
 	local owned = {}
 	local total = 0
-	for key, count in pairs(state.cards) do
+	for key in pairs(state.discovered) do
 		local card = CardData.ParseKey(key)
-		if card and count > 0 and not owned[card.id] then
+		if card and not owned[card.id] then
 			owned[card.id] = true
 			total += 1
 		end
@@ -633,6 +669,14 @@ local function onState(newState)
 end
 
 remotes.StateChanged.OnClientEvent:Connect(onState)
+remotes.Notify.OnClientEvent:Connect(function(text)
+	toast(text, Color3.fromRGB(255, 215, 80))
+end)
+remotes.OpenPanel.OnClientEvent:Connect(function(name)
+	if panels[name] then
+		openPanel(name)
+	end
+end)
 task.spawn(function()
 	onState(remotes.GetState:InvokeServer())
 end)

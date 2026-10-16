@@ -8,6 +8,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local CardData = require(ReplicatedStorage:WaitForChild("CardData"))
+local ShopWorld = require(script.Parent:WaitForChild("ShopWorld"))
 
 local DATA_VERSION_KEY = "CardShop_v1"
 local STARTING_COINS = 100
@@ -44,7 +45,11 @@ local SellCard = makeRemote("RemoteFunction", "SellCard")
 local SellDuplicates = makeRemote("RemoteFunction", "SellDuplicates")
 local BuyUpgrade = makeRemote("RemoteFunction", "BuyUpgrade")
 local GetState = makeRemote("RemoteFunction", "GetState")
+local StockCase = makeRemote("RemoteFunction", "StockCase")
 local StateChanged = makeRemote("RemoteEvent", "StateChanged")
+local Notify = makeRemote("RemoteEvent", "Notify")
+local OpenPanel = makeRemote("RemoteEvent", "OpenPanel")
+local GoToShop = makeRemote("RemoteEvent", "GoToShop")
 
 -- Player data --------------------------------------------------------------
 
@@ -57,13 +62,21 @@ local function newData()
 	return {
 		coins = STARTING_COINS,
 		cards = {}, -- [key] = count
-		upgrades = { sell = 0, luck = 0, cashier = 0 },
+		discovered = {}, -- [key] = true for every card ever pulled
+		display = {}, -- [tostring(caseIndex)] = key on display in the shop
+		upgrades = { sell = 0, luck = 0, cashier = 0, cases = 0, ads = 0 },
 		packsOpened = 0,
 	}
 end
 
 -- Fill in fields added in later updates so old saves keep working.
 local function reconcile(data)
+	if data.discovered == nil then
+		data.discovered = {}
+		for key in pairs(data.cards or {}) do
+			data.discovered[key] = true
+		end
+	end
 	local template = newData()
 	for field, default in pairs(template) do
 		if data[field] == nil then
@@ -81,9 +94,9 @@ end
 local function countUnique(data)
 	local seen = {}
 	local total = 0
-	for key, count in pairs(data.cards) do
+	for key in pairs(data.discovered) do
 		local card = CardData.ParseKey(key)
-		if card and count > 0 and not seen[card.id] then
+		if card and not seen[card.id] then
 			seen[card.id] = true
 			total += 1
 		end
@@ -164,19 +177,24 @@ local function onPlayerAdded(player)
 		warn("[CardShop] Playing without saving for " .. player.Name)
 	end
 	pushState(player)
+
+	if ShopWorld.Claim(player) then
+		player.CharacterAdded:Connect(function(character)
+			character:WaitForChild("HumanoidRootPart")
+			task.wait(0.1) -- let the default spawn finish first
+			ShopWorld.SendHome(player)
+		end)
+	else
+		Notify:FireClient(player, "All shop plots are taken, but you can still open packs!")
+	end
 end
 
 local function onPlayerRemoving(player)
+	ShopWorld.Release(player)
 	saveData(player)
 	sessionData[player] = nil
 	canSave[player] = nil
 	lastPackTime[player] = nil
-end
-
-Players.PlayerAdded:Connect(onPlayerAdded)
-Players.PlayerRemoving:Connect(onPlayerRemoving)
-for _, player in ipairs(Players:GetPlayers()) do
-	task.spawn(onPlayerAdded, player)
 end
 
 game:BindToClose(function()
@@ -249,7 +267,8 @@ OpenPack.OnServerInvoke = function(player, packId)
 	local pulls = {}
 	for _ = 1, CardData.CARDS_PER_PACK do
 		local key = rollCard(pack, data.upgrades.luck)
-		local isNew = (data.cards[key] or 0) == 0
+		local isNew = not data.discovered[key]
+		data.discovered[key] = true
 		data.cards[key] = (data.cards[key] or 0) + 1
 		table.insert(pulls, { key = key, isNew = isNew })
 	end
@@ -312,8 +331,83 @@ BuyUpgrade.OnServerInvoke = function(player, upgradeId)
 	data.coins -= cost
 	data.upgrades[upgradeId] = level + 1
 	pushState(player)
+	if upgradeId == "cases" or upgradeId == "sell" then
+		ShopWorld.RefreshCases(player) -- new case, or new prices on the tags
+	end
 	return { ok = true }
 end
+
+-- Shop display cases -------------------------------------------------------
+
+-- Moves one copy of a card from the binder into the first empty case.
+StockCase.OnServerInvoke = function(player, key)
+	local data = sessionData[player]
+	if not data or type(key) ~= "string" or (data.cards[key] or 0) <= 0 then
+		return { ok = false, err = "You don't own that card" }
+	end
+	for index = 1, CardData.GetCaseCount(data.upgrades.cases) do
+		local slot = tostring(index)
+		if not data.display[slot] then
+			data.display[slot] = key
+			data.cards[key] = data.cards[key] > 1 and data.cards[key] - 1 or nil
+			pushState(player)
+			ShopWorld.RefreshCases(player)
+			return { ok = true }
+		end
+	end
+	return { ok = false, err = "All cases are full! Upgrade Display Cases" }
+end
+
+local function takeBack(player, caseIndex)
+	local data = sessionData[player]
+	local slot = tostring(caseIndex)
+	local key = data and data.display[slot]
+	if not key then
+		return
+	end
+	data.display[slot] = nil
+	data.cards[key] = (data.cards[key] or 0) + 1
+	pushState(player)
+	ShopWorld.RefreshCases(player)
+end
+
+-- Called by ShopWorld when a customer buys a card. If the player has a spare
+-- copy of the same card, it goes straight back on display.
+local function sellFromCase(player, caseIndex)
+	local data = sessionData[player]
+	local slot = tostring(caseIndex)
+	local key = data and data.display[slot]
+	if not key then
+		return nil
+	end
+	local price = CardData.GetShopPrice(key, data.upgrades.sell)
+	data.coins += price
+	if (data.cards[key] or 0) > 1 then
+		data.cards[key] -= 1
+	else
+		data.display[slot] = nil
+	end
+	pushState(player)
+	ShopWorld.RefreshCases(player)
+	local card = CardData.ParseKey(key)
+	Notify:FireClient(player, ("A customer bought %s for 🪙%d!"):format(card.name, price))
+	return price
+end
+
+ShopWorld.Init({
+	getData = function(player)
+		return player and sessionData[player]
+	end,
+	takeBack = takeBack,
+	sellFromCase = sellFromCase,
+	openBinder = function(player)
+		OpenPanel:FireClient(player, "Binder")
+	end,
+})
+
+GoToShop.OnServerEvent:Connect(function(player)
+	ShopWorld.SendHome(player)
+end)
 
 GetState.OnServerInvoke = function(player)
 	return sessionData[player]
@@ -333,3 +427,10 @@ task.spawn(function()
 		end
 	end
 end)
+
+-- Connect last, once everything above (including ShopWorld hooks) is ready.
+Players.PlayerAdded:Connect(onPlayerAdded)
+Players.PlayerRemoving:Connect(onPlayerRemoving)
+for _, player in ipairs(Players:GetPlayers()) do
+	task.spawn(onPlayerAdded, player)
+end
