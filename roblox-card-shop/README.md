@@ -7,7 +7,7 @@ customers buy them.
 All creatures are original. Don't add real Pokémon names or art, because
 Roblox will take the game down.
 
-## What's in version 1
+## What's in the game
 
 - **3 packs**: Basic, Great and Ultra. Each has 5 cards with different rarity odds.
 - **40 cards** in 5 rarities: Common, Uncommon, Rare, Holo and Secret. Any card has a 1% chance to be a **Shiny** worth 5x.
@@ -84,7 +84,7 @@ Everything you'd want to tweak is in `CardData`:
 - **Card values**: change `value` in `CardData.Rarities`.
 - **Upgrade costs**: edit `CardData.Upgrades`.
 - **Shop prices and customer speed**: `SHOP_PRICE_MULTIPLIER`, `MAX_CUSTOMERS` and `GetCustomerInterval`.
-- **Shop layout**: the walls, counter and case spots are near the top of `ShopWorld`.
+- **Shop layout**: case spots are near the top of `ShopWorld`, and the walls and counter are in `buildShop`.
 
 Don't rename existing card `id`s after people have played, or the cards
 they already own will vanish from their binders.
